@@ -1,0 +1,7 @@
+{
+  "name": "ai-atrboards-exporter",
+  "version": "0.9.0",
+  "description": "Atrboards exporter for Abode Illustrator",
+  "author": "Betula <mail@betula.co> (http://betula.co)",
+  "repository": "https://github.com/betula/ai-artboards-exporter.git"
+}
