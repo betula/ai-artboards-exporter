@@ -161,9 +161,14 @@ function exportSvgFiles(folder) {
     artboards,
     index,
     pathSeparator,
+    docName,
+    prefix,
     file,
     files,
-    prefix;
+    fileDestination,
+    tmpFolder,
+    tmpFolderName,
+    overwrite = null;
 
   pathSeparator = Folder.fs == 'Windows'
     ? '\\'
@@ -172,28 +177,78 @@ function exportSvgFiles(folder) {
   doc = getActiveDocument();
   artboards = getArtboards();
 
-  prefix = '__' + Date.now().toString(32) + parseInt(String(Math.random()).slice(2)).toString(32);
+  tmpFolderName = '__temp' + Date.now().toString(32) + parseInt(String(Math.random()).slice(2)).toString(32);
 
   function sanitizeFileNames() {
-    files = folder.getFiles(prefix + '_*');
+    files = tmpFolder.getFiles(prefix + '*');
+    if (files.length == 0) {
+      files = tmpFolder.getFiles('*');
+      prefix = '';
+    }
+
     for (index = 0; index < files.length; index++) {
       file = files[index];
-      file.rename(file.name.slice(prefix.length + 1));
+
+      fileDestination = new File(folder.fullName + pathSeparator + file.name.slice(prefix.length));
+
+      if (fileDestination.exists) {
+        if (overwrite === null) {
+          overwrite = !!confirm('Some destination files are exists. Overwrite it?');
+        }
+        if (overwrite === true) {
+          fileDestination.remove();
+          file.copy(fileDestination);
+        }
+        else {
+          file.remove();
+        }
+      }
+      else {
+        file.copy(fileDestination);
+      }
     }
   }
 
-  if (artboards.length > 0) {
-    file = new File(folder.fullName + pathSeparator + prefix);
+  function removeTmpFolder() {
+    tmpFolder = new Folder(folder.fullName + pathSeparator + tmpFolderName);
+    files = tmpFolder.getFiles('*');
+    for (index = 0; index < files.length; index++) {
+      files[index].remove();
+    }
+    tmpFolder.remove();
+  }
 
+  function finalizeExport() {
+    sanitizeFileNames();
+    removeTmpFolder();
+  }
+
+  if (artboards.length > 0) {
+    docName = doc.name;
+    prefix = docName.split('.').slice(0, -1).join('.') + '_';
+
+    tmpFolder = new Folder(folder.fullName + pathSeparator + tmpFolderName);
+    if (!tmpFolder.exists) {
+      if (!tmpFolder.create()) {
+        alert('Could not create tmp folder for SVG files export "' + tmpFolder.fullName + '"');
+        return;
+      }
+    }
+    files = tmpFolder.getFiles('*');
+    for (index = 0; index < files.length; index++) {
+      files[index].remove();
+    }
+
+    file = new File(folder.fullName + pathSeparator + tmpFolderName + pathSeparator + docName);
     options = new ExportOptionsSVG();
     options.saveMultipleArtboards = true;
 
     try {
       doc.exportFile(file, ExportType.SVG, options);
-      sanitizeFileNames();
+      finalizeExport();
     }
     catch(e) {
-      sanitizeFileNames();
+      finalizeExport();
     }
   }
 }
