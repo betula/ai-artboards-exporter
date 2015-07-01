@@ -1,6 +1,9 @@
 // guide http://wwwimages.adobe.com/content/dam/Adobe/en/devnet/scripting/pdfs/javascript_tools_guide.pdf
 // guide http://wwwimages.adobe.com/content/dam/Adobe/en/devnet/illustrator/sdk/CC2014/Illustrator%20Scripting%20Reference%20-%20JavaScript.pdf
 
+var
+  overwrite = null;
+
 main();
 
 function showExportDialog(success) {
@@ -16,9 +19,9 @@ function showExportDialog(success) {
   var svgSelector = selectorGroup.add('checkbox', undefined, 'SVG');
   svgSelector.value = true;
   var pngSelector = selectorGroup.add('checkbox', undefined, 'PNG');
+  pngSelector.value = true;
 
   var pngSelectorPanel = dialog.add('panel', undefined, 'PNG Settings');
-  pngSelectorPanel.enabled = false;
   pngSelectorPanel.orientation = 'column';
   pngSelectorPanel.alignChildren = 'left';
 
@@ -44,10 +47,6 @@ function showExportDialog(success) {
 
   pngSelector.onClick = function() {
     pngSelectorPanel.enabled = pngSelector.value;
-
-    alert('PNG format not implemented yet');
-    pngSelector.value = false;
-    pngSelectorPanel.enabled = false;
   };
 
   pngSize64Selector.onClick = function() {
@@ -167,8 +166,7 @@ function exportSvgFiles(folder) {
     files,
     fileDestination,
     tmpFolder,
-    tmpFolderName,
-    overwrite = null;
+    tmpFolderName;
 
   pathSeparator = Folder.fs == 'Windows'
     ? '\\'
@@ -256,25 +254,58 @@ function exportSvgFiles(folder) {
 function exportPngFiles(folder, settings) {
   var
     doc,
-    exportOptions,
+    options,
     artboards,
     index,
     artboard,
-    pathSeparator;
+    pathSeparator,
+    file,
+    artboardRect,
+    artboardWidth,
+    artboardHeight,
+    artboardScale,
+    files;
 
   pathSeparator = Folder.fs == 'Windows'
     ? '\\'
     : '/';
 
   doc = getActiveDocument();
-  exportOptions = new ExportOptionsPNG24();
   artboards = getArtboards();
 
   if (artboards.length > 0) {
 
     for (index = 0; index < artboards.length; index++) {
+      artboards.setActiveArtboardIndex(index);
       artboard = artboards[index];
 
+      artboardRect = artboard.artboardRect;
+      artboardWidth = artboardRect[2]-artboardRect[0];
+      artboardHeight = artboardRect[1]-artboardRect[3];
+
+      file = new File(folder.fullName + pathSeparator + artboard.name + '.png');
+
+      if (file.exists) {
+        if (overwrite === null) {
+          overwrite = !!confirm('Some destination files are exists. Overwrite it?');
+        }
+        if (overwrite === true) {
+          file.remove();
+        }
+      }
+
+      options = new ExportOptionsPNG24();
+      options.artBoardClipping = true;
+
+      if (settings.size) {
+        artboardScale = Math.min(
+          settings.size / artboardWidth,
+          settings.size / artboardHeight
+        );
+        options.horizontalScale = options.verticalScale = artboardScale * 100;
+      }
+
+      doc.exportFile(file, ExportType.PNG24, options);
     }
   }
 
