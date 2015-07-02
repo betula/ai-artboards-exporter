@@ -6,16 +6,50 @@ var
 
 main();
 
+function getActiveDocument() {
+  return app && app.activeDocument;
+}
+
+function getArtboards() {
+  var
+    doc;
+
+  return (doc = getActiveDocument()) && doc.artboards || [];
+}
+
 function showExportDialog(success) {
+  var
+    atrboards = getArtboards();
 
   var dialog = new Window('dialog', 'Artboards exporter', undefined, { closeButton: true });
   dialog.alignChildren = 'left';
   dialog.orientation = 'column';
 
+  var rangeGroup = dialog.add('group');
+  rangeGroup.orientation = 'row';
+  rangeGroup.alignChildren = ['left', 'top'];
+
+  rangeGroup.add('statictext', undefined, 'Artboards:');
+  var rangeAllSelector = rangeGroup.add('radiobutton', undefined, 'All');
+  rangeAllSelector.value = true;
+
+  var rangeUseCustomSelector = rangeGroup.add('radiobutton', undefined, 'Range');
+  var rangeCustomSelector = rangeGroup.add('edittext', undefined, atrboards.length ? '1-'+atrboards.length : '');
+  rangeCustomSelector.characters = 10;
+  rangeCustomSelector.enabled = false;
+
+  rangeUseCustomSelector.onClick = function() {
+    rangeCustomSelector.enabled = pngSelector.value;
+  };
+  rangeAllSelector.onClick = function() {
+    rangeCustomSelector.enabled = false;
+  };
+
   var selectorGroup = dialog.add('group');
   selectorGroup.orientation = 'row';
-  selectorGroup.alignChildren = 'left';
+  selectorGroup.alignChildren = ['left', 'top'];
 
+  selectorGroup.add('statictext', undefined, 'Formats:');
   var svgSelector = selectorGroup.add('checkbox', undefined, 'SVG');
   svgSelector.value = true;
   var pngSelector = selectorGroup.add('checkbox', undefined, 'PNG');
@@ -23,22 +57,22 @@ function showExportDialog(success) {
 
   var pngSelectorPanel = dialog.add('panel', undefined, 'PNG Settings');
   pngSelectorPanel.orientation = 'column';
-  pngSelectorPanel.alignChildren = 'left';
+  pngSelectorPanel.alignChildren = ['left', 'top'];
 
   var pngFixedSelectorGroup = pngSelectorPanel.add('group');
   pngFixedSelectorGroup.orientation = 'row';
-  pngFixedSelectorGroup.alignChildren = 'left';
+  pngFixedSelectorGroup.alignChildren = ['left', 'top'];
   var pngSize64Selector = pngFixedSelectorGroup.add('radiobutton', undefined, '64');
   var pngSize128Selector = pngFixedSelectorGroup.add('radiobutton', undefined, '128');
   pngSize128Selector.value = true;
   var pngSize256Selector = pngFixedSelectorGroup.add('radiobutton', undefined, '256');
   var pngSize512Selector = pngFixedSelectorGroup.add('radiobutton', undefined, '512');
-  var pngSizeCustomSelector = pngFixedSelectorGroup.add('radiobutton', undefined, 'custom');
+  var pngSizeCustomSelector = pngFixedSelectorGroup.add('radiobutton', undefined, 'Custom');
   pngSizeCustomSelector.enabled = false;
 
   var pngCustomSizeSelectorGroup = pngSelectorPanel.add('group');
   pngCustomSizeSelectorGroup.orientation = 'row';
-  pngCustomSizeSelectorGroup.alignChildren = 'left';
+  pngCustomSizeSelectorGroup.alignChildren = ['left', 'top'];
 
   pngCustomSizeSelectorGroup.add('statictext', undefined, 'Custom size:');
   var pngCustomSizeSelector = pngCustomSizeSelectorGroup.add('edittext', undefined, '128');
@@ -119,6 +153,9 @@ function showExportDialog(success) {
 
   okButton.onClick = function() {
     var
+      indexes = null,
+      rangeMin = Math.min(1, atrboards.length),
+      rangeMax = atrboards.length,
       formats = {};
 
     if (svgSelector.value) {
@@ -129,8 +166,81 @@ function showExportDialog(success) {
       formats.png.size = parseFloat(pngCustomSizeSelector.text);
     }
 
+    if (rangeUseCustomSelector.value) {
+      indexes = map(
+        reduce(
+          filter(
+            map(
+              rangeCustomSelector.text.split(/[^0-9-]/),
+              function(interval) {
+                var
+                  left,
+                  right,
+                  t,
+                  numbers = [],
+                  num;
+
+                if (!interval) {
+                  return null;
+                }
+
+                interval = interval.split('-');
+                if (interval.length == 1) {
+                  interval.push(interval[0]);
+                }
+
+                left = interval[0];
+                left = left || left === '0'
+                  ? parseInt(left)
+                  : rangeMin;
+
+                right = interval[interval.length - 1];
+                right = right || right === '0'
+                  ? parseInt(right)
+                  : rangeMax;
+
+                if (left > right) {
+                  t = right;
+                  right = left;
+                  left = t;
+                }
+
+                for(num = left; num <= right; num++) {
+                  numbers.push(num);
+                }
+
+                return numbers;
+              }
+            ),
+            function(numbers) {
+              return numbers;
+            }
+          ),
+          function(result, numbers) {
+            var
+              index,
+              num;
+
+            for (index = 0; index < numbers.length; index++) {
+              num = numbers[index];
+              if (indexOf(result, num) == -1) {
+                result.push(num);
+              }
+            }
+
+            return result;
+          },
+          []
+        ),
+        function(number) {
+          return number - 1;
+        }
+      );
+    }
+
     if (formats.svg || formats.png) {
       success && success({
+        indexes: indexes,
         formats: formats
       });
     }
@@ -141,23 +251,14 @@ function showExportDialog(success) {
 
 }
 
-function getActiveDocument() {
-  return app && app.activeDocument;
-}
-
-function getArtboards() {
-  var
-    doc;
-
-  return (doc = getActiveDocument()) && doc.artboards || [];
-}
 
 
-function exportSvgFiles(folder) {
+function exportSvgFiles(folder, settings, indexes) {
   var
     doc,
     options,
     artboards,
+    artboard,
     index,
     pathSeparator,
     docName,
@@ -166,7 +267,8 @@ function exportSvgFiles(folder) {
     files,
     fileDestination,
     tmpFolder,
-    tmpFolderName;
+    tmpFolderName,
+    removes;
 
   pathSeparator = Folder.fs == 'Windows'
     ? '\\'
@@ -177,7 +279,18 @@ function exportSvgFiles(folder) {
 
   tmpFolderName = '__temp' + Date.now().toString(32) + parseInt(String(Math.random()).slice(2)).toString(32);
 
-  function sanitizeFileNames() {
+  function performFiles() {
+    removes = [];
+
+    if (indexes) {
+      for (index = 0; index < artboards.length; index++) {
+        artboard = artboards[index];
+        if (indexOf(indexes, index) == -1) {
+          removes.push(artboard.name);
+        }
+      }
+    }
+
     files = tmpFolder.getFiles(prefix + '*');
     if (files.length == 0) {
       files = tmpFolder.getFiles('*');
@@ -186,23 +299,29 @@ function exportSvgFiles(folder) {
 
     for (index = 0; index < files.length; index++) {
       file = files[index];
-
       fileDestination = new File(folder.fullName + pathSeparator + file.name.slice(prefix.length));
 
-      if (fileDestination.exists) {
-        if (overwrite === null) {
-          overwrite = !!confirm('Some destination files are exists. Overwrite it?');
-        }
-        if (overwrite === true) {
-          fileDestination.remove();
-          file.copy(fileDestination);
-        }
-        else {
-          file.remove();
-        }
+      if (
+        indexOf(removes, fileDestination.name.split('.').slice(0, -1).join('.')) != -1
+      ) {
+        file.remove();
       }
       else {
-        file.copy(fileDestination);
+        if (fileDestination.exists) {
+          if (overwrite === null) {
+            overwrite = !!confirm('Some destination files are exists. Overwrite it?');
+          }
+          if (overwrite === true) {
+            fileDestination.remove();
+            file.copy(fileDestination);
+          }
+          else {
+            file.remove();
+          }
+        }
+        else {
+          file.copy(fileDestination);
+        }
       }
     }
   }
@@ -217,13 +336,16 @@ function exportSvgFiles(folder) {
   }
 
   function finalizeExport() {
-    sanitizeFileNames();
+    performFiles();
     removeTmpFolder();
   }
 
   if (artboards.length > 0) {
     docName = doc.name;
-    prefix = docName.split('.').slice(0, -1).join('.') + '_';
+
+    prefix = docName.indexOf('.') > 0
+      ? docName.split('.').slice(0, -1).join('.') + '_'
+      : docName + '-';
 
     tmpFolder = new Folder(folder.fullName + pathSeparator + tmpFolderName);
     if (!tmpFolder.exists) {
@@ -251,7 +373,7 @@ function exportSvgFiles(folder) {
   }
 }
 
-function exportPngFiles(folder, settings) {
+function exportPngFiles(folder, settings, indexes) {
   var
     doc,
     options,
@@ -276,6 +398,10 @@ function exportPngFiles(folder, settings) {
   if (artboards.length > 0) {
 
     for (index = 0; index < artboards.length; index++) {
+      if (indexes && indexOf(indexes, index) == -1) {
+        continue;
+      }
+
       artboards.setActiveArtboardIndex(index);
       artboard = artboards[index];
 
@@ -338,11 +464,11 @@ function main() {
             alert('Could not create folder for SVG files "' + svgFolderPath + '"');
           }
           else {
-            exportSvgFiles(svgFolder, data.formats.svg);
+            exportSvgFiles(svgFolder, data.formats.svg, data.indexes);
           }
         }
         else {
-          exportSvgFiles(svgFolder, data.formats.svg);
+          exportSvgFiles(svgFolder, data.formats.svg, data.indexes);
         }
       }
 
@@ -354,20 +480,62 @@ function main() {
             alert('Could not create folder for PNG files "' + svgFolderPath + '"');
           }
           else {
-            exportPngFiles(pngFolder, data.formats.png);
+            exportPngFiles(pngFolder, data.formats.png, data.indexes);
           }
         }
         else {
-          exportPngFiles(pngFolder, data.formats.png);
+          exportPngFiles(pngFolder, data.formats.png, data.indexes);
         }
       }
 
+      alert('Done');
 
     }
   });
 }
 
 
+function map(values, fn) {
+  var
+    index,
+    result = [];
+  for (index = 0; index < values.length; index++) {
+    result.push(
+      fn(values[index])
+    )
+  }
+  return result;
+}
 
+function filter(values, fn) {
+  var
+    index,
+    result = [];
+  for (index = 0; index < values.length; index++) {
+    if (fn(values[index])) {
+      result.push(values[index])
+    }
+  }
+  return result;
+}
 
+function reduce(values, fn, init) {
+  var
+    index,
+    result = init;
+  for (index = 0; index < values.length; index++) {
+    result = fn(result, values[index]);
+  }
+  return result;
+}
 
+function indexOf(values, value) {
+  var
+    index;
+  for (index = 0; index < values.length; index++) {
+    if (values[index] === value) {
+      return index;
+    }
+  }
+  return -1;
+}
